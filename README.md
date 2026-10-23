@@ -1,5 +1,5 @@
 # alertas-climaticas
-Sistema de Alertas Climaticas. Servicio HTTP...
+Sistema de Alertas Climaticas. Servicio HTTP construido con Python, FastAPI y PostgreSQL que permite a los usuarios configurar alertas sobre sus campos y ser notificados cuando el pronostico de los proximos 7 dias supera el umbral definido.
 
 ## API
 
