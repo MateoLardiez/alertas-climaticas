@@ -1,3 +1,5 @@
 task.pdf
 todo.md
 notas.md
+.env
+__pycache__/
