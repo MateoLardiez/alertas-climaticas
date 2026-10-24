@@ -69,6 +69,69 @@ El codigo DBML que genera el diagrama esta al final de este documento ([Anexo](#
 - **Tabla `users` en plural:** `user` es palabra reservada en PostgreSQL.
 - **Borrado:** eliminar una `farm` elimina en cascada sus alertas y notificaciones. Eliminar una `region` con campos asociados se rechaza (`RESTRICT`).
 
+## Seed de Datos Meteorologicos
+
+La consigna indica que la ingesta meteorologica ya existe, por lo que el clima se mockea con un script: `src/alertas_climaticas/seed.py`.
+
+### Que carga
+- **10 regiones** de la provincia de Buenos Aires: Mercedes, Tandil, Navarro, Pergamino, Balcarce, Trenque Lauquen, San Pedro, Cañuelas, Tres Arroyos y Lobos
+- **4 eventos:** lluvia, helada, calor extremo y tormenta
+- **Un pronostico por region, evento y dia** para 20 dias (desde hoy), con probabilidades en pasos de 20: 0, 20, 40, 60, 80 y 100. Son 800 filas (10 x 4 x 20)
+
+No carga usuarios, campos ni alertas: se crean con los endpoints de la API.
+
+### Como se generan los valores
+Para que el clima sea verosimil, los valores no son totalmente aleatorios:
+
+| Regla | Como se implementa |
+|---|---|
+| Calor extremo y helada no pueden ser altos a la vez | Cada dia se sortea un **estado termico** (calido 30%, frio 30%, templado 40%). En un dia calido el calor es 60, 80 o 100 y la helada 0. En un dia frio ocurre lo inverso. En un dia templado ambos son 0, 20 o 40 |
+| Los dias seguidos se parecen | El estado termico se conserva con un 60% de probabilidad. Si no, se vuelve a sortear |
+| Lluvia y tormenta estan correlacionadas, pero no siempre | La lluvia favorece valores bajos. El 70% de las veces la tormenta se deriva de la lluvia (igual o uno o dos escalones menos, nunca mas). El 30% restante es independiente y con valores bajos |
+
+La regla de calor y helada se cumple **por construccion**: los valores se generan de modo que no puedan violarla, en lugar de generarlos y descartar los invalidos.
+
+### Decisiones
+- **Semilla fija (`random.Random(42)`):** el seed genera siempre los mismos valores, lo que facilita reproducir problemas
+- **Idempotente:** se puede ejecutar varias veces sin error. Inserta con `ON CONFLICT DO NOTHING`, apoyado en las claves unicas del modelo
+- **No es una migracion:** las migraciones definen el esquema, y estos datos son solo para desarrollo y pruebas
+- **Generacion separada de la insercion:** las funciones que generan los valores no tocan la base, lo que permite testearlas por separado
+
+### Ejecutar
+Requiere la base levantada y las migraciones aplicadas (`uv run alembic upgrade head`):
+
+```
+uv run python -m alertas_climaticas.seed
+```
+
+### Volver a ejecutarlo
+- **El mismo dia:** no duplica ni falla. Las filas existentes se conservan
+- **Otro dia, o con otra cantidad de dias:** solo inserta las fechas que faltan. Las filas existentes **no se actualizan**, y los dias nuevos se generan con una secuencia aleatoria distinta, por lo que puede haber un salto en la continuidad entre los dias viejos y los nuevos
+- **Para regenerar todo de forma coherente:** vaciar la tabla y volver a ejecutar
+  ```
+  docker exec alertas-db psql -U alertas -d alertas -c "TRUNCATE weather_forecast"
+  uv run python -m alertas_climaticas.seed
+  ```
+
+### Validar
+Cantidad de filas (esperado: 800) y valores posibles (esperado: 0, 20, 40, 60, 80, 100):
+```sql
+SELECT count(*) FROM weather_forecast;
+SELECT DISTINCT probability FROM weather_forecast ORDER BY 1;
+```
+
+Dias en que calor extremo y helada son incompatibles (esperado: 0):
+```sql
+SELECT count(*)
+FROM weather_forecast heat
+JOIN event eh ON eh.id = heat.event_id AND eh.name = 'calor extremo'
+JOIN weather_forecast frost
+  ON frost.region_id = heat.region_id AND frost.forecast_date = heat.forecast_date
+JOIN event ef ON ef.id = frost.event_id AND ef.name = 'helada'
+WHERE (heat.probability >= 60 AND frost.probability > 0)
+   OR (frost.probability >= 60 AND heat.probability > 0);
+```
+
 ## Compilar y ejecutar
 
 ### Local
