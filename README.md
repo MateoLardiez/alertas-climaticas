@@ -193,7 +193,7 @@ Con la API corriendo, abrir en el navegador:
 Las paginas `/docs` y `/redoc` cargan sus archivos desde un CDN, por lo que necesitan conexion a internet y que ningun bloqueador del navegador los frene. Si la pagina queda en blanco, `/openapi.json` y los endpoints siguen funcionando.
 
 **Flujo de prueba en Swagger:**
-1. `POST /users` con `{"name": "Mateo"}` y copiar el `id` de la respuesta
+1. `POST /users` con `{"name": "Mateo"}` y copiar el `id` de la respuesta (si el usuario ya existe, `GET /users` lista los ids)
 2. `GET /regions` y copiar el `id` de una region
 3. `POST /farms` con `user_id`, `region_id` y `name`
 4. `GET /farms/{farm_id}` con el `id` del campo creado

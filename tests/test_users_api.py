@@ -1,4 +1,4 @@
-"""Tests de POST /users."""
+"""Tests de POST /users, GET /users y GET /users/{id}."""
 
 import uuid
 
@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from alertas_climaticas.models import User
+from tests import factories
 
 
 async def _count_users(session: AsyncSession) -> int:
@@ -86,7 +87,89 @@ async def test_create_user_rejects_a_request_without_json(client: AsyncClient) -
     assert not_json.status_code == 422
 
 
-async def test_users_endpoint_does_not_accept_get(client: AsyncClient) -> None:
-    response = await client.get("/users")
+class TestListUsers:
+    async def test_is_empty_without_users(self, client: AsyncClient) -> None:
+        response = await client.get("/users")
 
-    assert response.status_code == 405
+        assert response.status_code == 200
+        assert response.json() == []
+
+    async def test_returns_every_user_with_id_and_name(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        mateo = await factories.create_user(session, "Mateo")
+        ana = await factories.create_user(session, "Ana")
+
+        response = await client.get("/users")
+
+        assert response.status_code == 200
+        assert response.json() == [
+            {"id": str(ana.id), "name": "Ana"},
+            {"id": str(mateo.id), "name": "Mateo"},
+        ]
+
+    async def test_is_sorted_by_name(self, client: AsyncClient, session: AsyncSession) -> None:
+        for name in ["Zeta", "Alfa", "Mitad"]:
+            await factories.create_user(session, name)
+
+        response = await client.get("/users")
+
+        assert [user["name"] for user in response.json()] == ["Alfa", "Mitad", "Zeta"]
+
+    async def test_includes_users_with_repeated_names(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        await factories.create_user(session, "Mateo")
+        await factories.create_user(session, "Mateo")
+
+        response = await client.get("/users")
+
+        assert len(response.json()) == 2
+        assert len({user["id"] for user in response.json()}) == 2
+
+    async def test_includes_a_user_created_through_the_api(self, client: AsyncClient) -> None:
+        created = await client.post("/users", json={"name": "Mateo"})
+
+        listing = await client.get("/users")
+
+        assert listing.json() == [created.json()]
+
+
+class TestGetUser:
+    async def test_returns_the_user(self, client: AsyncClient, session: AsyncSession) -> None:
+        user = await factories.create_user(session, "Mateo")
+
+        response = await client.get(f"/users/{user.id}")
+
+        assert response.status_code == 200
+        assert response.json() == {"id": str(user.id), "name": "Mateo"}
+
+    async def test_returns_the_same_data_as_the_post(self, client: AsyncClient) -> None:
+        created = await client.post("/users", json={"name": "Mateo"})
+
+        response = await client.get(f"/users/{created.json()['id']}")
+
+        assert response.json() == created.json()
+
+    async def test_returns_only_the_requested_user(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        await factories.create_user(session, "Ana")
+        mateo = await factories.create_user(session, "Mateo")
+
+        response = await client.get(f"/users/{mateo.id}")
+
+        assert response.json()["name"] == "Mateo"
+
+    async def test_unknown_user_returns_404(self, client: AsyncClient) -> None:
+        unknown = uuid.uuid4()
+
+        response = await client.get(f"/users/{unknown}")
+
+        assert response.status_code == 404
+        assert response.json() == {"detail": f"User {unknown} not found"}
+
+    async def test_malformed_id_returns_422(self, client: AsyncClient) -> None:
+        response = await client.get("/users/no-es-un-uuid")
+
+        assert response.status_code == 422

@@ -37,6 +37,34 @@ class TestUserService:
         assert first.id != second.id
 
 
+class TestUserServiceReading:
+    async def test_get_user_returns_the_user(self, session: AsyncSession) -> None:
+        created = await factories.create_user(session, "Mateo")
+
+        user = await user_service.get_user(session, created.id)
+
+        assert (user.id, user.name) == (created.id, "Mateo")
+
+    async def test_get_user_rejects_an_unknown_user(self, session: AsyncSession) -> None:
+        unknown = uuid.uuid4()
+
+        with pytest.raises(NotFoundError) as error:
+            await user_service.get_user(session, unknown)
+
+        assert (error.value.resource, error.value.resource_id) == ("User", unknown)
+
+    async def test_list_users_is_empty_without_users(self, session: AsyncSession) -> None:
+        assert list(await user_service.list_users(session)) == []
+
+    async def test_list_users_is_sorted_by_name(self, session: AsyncSession) -> None:
+        for name in ["Zeta", "Alfa", "Mitad"]:
+            await factories.create_user(session, name)
+
+        users = await user_service.list_users(session)
+
+        assert [user.name for user in users] == ["Alfa", "Mitad", "Zeta"]
+
+
 class TestRegionService:
     async def test_list_regions_is_empty_without_regions(self, session: AsyncSession) -> None:
         assert list(await region_service.list_regions(session)) == []
