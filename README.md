@@ -132,6 +132,38 @@ WHERE (heat.probability >= 60 AND frost.probability > 0)
    OR (frost.probability >= 60 AND heat.probability > 0);
 ```
 
+## Background Job de notificacion de alertas
+
+El job evalua los pronosticos contra las alertas y genera las notificaciones. La logica esta en `services/evaluation.py` (`evaluate_alerts`).
+
+### Como funciona
+1. Toma una ventana de **7 dias**: desde hoy hasta hoy + 6
+2. Cruza cada alerta con el pronostico de la region de su campo, para el mismo evento
+3. Crea una notificacion por cada **alerta y dia** en que la probabilidad es **mayor o igual** al umbral
+4. Devuelve la cantidad de notificaciones nuevas
+
+Todo se resuelve en una unica consulta, sin recorrer las alertas una por una:
+
+```sql
+INSERT INTO notification (alert_id, forecast_date, probability)
+  SELECT a.id, wf.forecast_date, wf.probability
+  FROM alert a
+  JOIN farm f ON f.id = a.farm_id
+  JOIN weather_forecast wf ON wf.region_id = f.region_id AND wf.event_id = a.event_id
+  WHERE wf.forecast_date BETWEEN :desde AND :hasta
+    AND wf.probability >= a.threshold
+  ORDER BY a.id, wf.forecast_date
+  ON CONFLICT (alert_id, forecast_date) DO NOTHING
+  RETURNING id
+```
+`:desde` es hoy y `:hasta` es hoy + 6. Los pasa la aplicacion como parametros. `RETURNING id` devuelve los ids de las notificaciones creadas, sin incluir las que `ON CONFLICT` ignoro.
+
+### Garantias
+- **Sin duplicados:** `ON CONFLICT DO NOTHING` sobre la clave unica `(alert_id, forecast_date)` (restriccion `uq_notification_alert_date`). Ejecutar el job varias veces, o dos a la vez, crea cada notificacion una sola vez
+- **Sin deadlocks:** el `ORDER BY` hace que toda ejecucion inserte las filas en el mismo orden, por lo que dos ejecuciones simultaneas no se bloquean entre si
+- **Snapshot:** la notificacion guarda la probabilidad del momento. Si el pronostico cambia despues, no se vuelve a avisar ni se modifica
+
+
 ## Compilar y ejecutar
 
 ### Local
