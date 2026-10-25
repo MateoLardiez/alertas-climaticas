@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from alertas_climaticas.schemas.farm import FarmCreate, FarmRead
+from alertas_climaticas.schemas.farm import FarmCreate, FarmRead, FarmUpdate
 from alertas_climaticas.schemas.region import RegionRead
 from alertas_climaticas.schemas.user import UserCreate, UserRead
 
@@ -101,6 +101,55 @@ def test_farm_create_requires_every_field(field: str) -> None:
 def test_farm_create_rejects_invalid_values(field: str, value: object) -> None:
     with pytest.raises(ValidationError):
         FarmCreate.model_validate(_farm_data(**{field: value}))
+
+
+def test_farm_update_accepts_only_the_name() -> None:
+    update = FarmUpdate(name="Nuevo")
+
+    assert update.model_dump(exclude_unset=True) == {"name": "Nuevo"}
+
+
+def test_farm_update_accepts_only_the_region() -> None:
+    region_id = uuid.uuid4()
+
+    update = FarmUpdate(region_id=region_id)
+
+    assert update.model_dump(exclude_unset=True) == {"region_id": region_id}
+
+
+def test_farm_update_accepts_name_and_region() -> None:
+    region_id = uuid.uuid4()
+
+    update = FarmUpdate(name="Nuevo", region_id=region_id)
+
+    assert update.model_dump(exclude_unset=True) == {"name": "Nuevo", "region_id": region_id}
+
+
+def test_farm_update_strips_the_name() -> None:
+    assert FarmUpdate(name="  Nuevo  ").name == "Nuevo"
+
+
+def test_farm_update_rejects_an_empty_update() -> None:
+    with pytest.raises(ValidationError, match="at least one field"):
+        FarmUpdate()
+
+
+@pytest.mark.parametrize("data", [{"name": None}, {"region_id": None}, {"name": "ok", "region_id": None}])
+def test_farm_update_rejects_explicit_nulls(data: dict[str, object]) -> None:
+    with pytest.raises(ValidationError, match="cannot be null"):
+        FarmUpdate.model_validate(data)
+
+
+@pytest.mark.parametrize("data", [{"name": ""}, {"name": "   "}, {"name": 5}, {"region_id": "xyz"}])
+def test_farm_update_rejects_invalid_values(data: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        FarmUpdate.model_validate(data)
+
+
+@pytest.mark.parametrize("extra", ["user_id", "id", "desconocido"])
+def test_farm_update_rejects_fields_that_cannot_be_changed(extra: str) -> None:
+    with pytest.raises(ValidationError):
+        FarmUpdate.model_validate({"name": "Nuevo", extra: str(uuid.uuid4())})
 
 
 def test_farm_create_has_no_id_field() -> None:
