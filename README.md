@@ -76,7 +76,7 @@ La consigna indica que la ingesta meteorologica ya existe, por lo que el clima s
 ### Que carga
 - **10 regiones** de la provincia de Buenos Aires: Mercedes, Tandil, Navarro, Pergamino, Balcarce, Trenque Lauquen, San Pedro, Cañuelas, Tres Arroyos y Lobos
 - **4 eventos:** lluvia, helada, calor extremo y tormenta
-- **Un pronostico por region, evento y dia** para 20 dias (desde hoy), con probabilidades en pasos de 20: 0, 20, 40, 60, 80 y 100. Son 800 filas (10 x 4 x 20)
+- **Un pronostico por region, evento y dia** para 30 dias (desde hoy), con probabilidades en pasos de 20: 0, 20, 40, 60, 80 y 100. Son 1200 filas (10 x 4 x 30)
 
 No carga usuarios, campos ni alertas: se crean con los endpoints de la API.
 
@@ -114,7 +114,7 @@ uv run python -m alertas_climaticas.seed
   ```
 
 ### Validar
-Cantidad de filas (esperado: 800) y valores posibles (esperado: 0, 20, 40, 60, 80, 100):
+Cantidad de filas (esperado: 1200) y valores posibles (esperado: 0, 20, 40, 60, 80, 100):
 ```sql
 SELECT count(*) FROM weather_forecast;
 SELECT DISTINCT probability FROM weather_forecast ORDER BY 1;
@@ -137,6 +137,27 @@ WHERE (heat.probability >= 60 AND frost.probability > 0)
 ### Local
 
 ### Docker
+
+## Tests
+
+Los tests de integracion usan una base PostgreSQL **separada** (`alertas_test`), para no tocar los datos de desarrollo.
+
+### Requisitos
+- **PostgreSQL levantado** en el host y puerto de `.env.test`. Con Docker: `docker start alertas-db`
+- Dependencias instaladas: `uv sync`
+
+### Ejecutar
+```
+uv run pytest                  # todos los tests
+uv run pytest -m "not db"      # solo los que no necesitan la base
+```
+
+### Como funcionan
+- `tests/conftest.py` lee `.env.test`, crea `alertas_test` si no existe, la recrea vacia y aplica `alembic upgrade head`. Cada corrida prueba tambien las migraciones desde cero
+- Despues de cada test se vacian las tablas, por lo que ningun test depende de otro
+- Los tests que usan la base se marcan solos con `db`
+- **Si la base no esta disponible**, solo un test falla, con un mensaje que explica la causa (host, puerto y error). Los demas tests que usan la base se omiten, y los que no la usan se ejecutan igual
+- **Salvaguarda:** el nombre de la base de tests debe terminar en `_test`. El fixture borra todo el esquema, y asi nunca puede apuntar a la base de desarrollo
 
 ## Estructura del Sistema
 
