@@ -7,7 +7,7 @@ from fastapi import APIRouter, status
 
 from alertas_climaticas.database.session import SessionDep
 from alertas_climaticas.models import User
-from alertas_climaticas.schemas.user import UserCreate, UserRead
+from alertas_climaticas.schemas.user import UserCreate, UserDetailRead, UserRead
 from alertas_climaticas.services import users as user_service
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -25,8 +25,8 @@ async def list_users(session: SessionDep) -> Sequence[User]:
 
 @router.get(
     "/{user_id}",
-    response_model=UserRead,
+    response_model=UserDetailRead,
     responses={404: {"description": "El usuario no existe"}},
 )
-async def get_user(user_id: uuid.UUID, session: SessionDep) -> User:
-    return await user_service.get_user(session, user_id)
+async def get_user(user_id: uuid.UUID, session: SessionDep) -> UserDetailRead:
+    return await user_service.get_user_detail(session, user_id)

@@ -142,14 +142,82 @@ class TestGetUser:
         response = await client.get(f"/users/{user.id}")
 
         assert response.status_code == 200
-        assert response.json() == {"id": str(user.id), "name": "Mateo"}
+        assert response.json() == {"id": str(user.id), "name": "Mateo", "farm_ids": []}
 
-    async def test_returns_the_same_data_as_the_post(self, client: AsyncClient) -> None:
+    async def test_returns_the_same_data_as_the_post_plus_the_farm_ids(
+        self, client: AsyncClient
+    ) -> None:
         created = await client.post("/users", json={"name": "Mateo"})
 
         response = await client.get(f"/users/{created.json()['id']}")
 
-        assert response.json() == created.json()
+        assert response.json() == created.json() | {"farm_ids": []}
+
+    async def test_includes_the_ids_of_the_users_farms_sorted_by_name(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        user = await factories.create_user(session)
+        region = await factories.create_region(session)
+        zeta = await factories.create_farm(session, user, region, "Zeta")
+        alfa = await factories.create_farm(session, user, region, "Alfa")
+
+        response = await client.get(f"/users/{user.id}")
+
+        assert response.json()["farm_ids"] == [str(alfa.id), str(zeta.id)]
+
+    async def test_does_not_include_farms_of_other_users(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        mine = await factories.create_user(session, "Yo")
+        other = await factories.create_user(session, "Otro")
+        region = await factories.create_region(session)
+        own_farm = await factories.create_farm(session, mine, region, "Mio")
+        await factories.create_farm(session, other, region, "Ajeno")
+
+        response = await client.get(f"/users/{mine.id}")
+
+        assert response.json()["farm_ids"] == [str(own_farm.id)]
+
+    async def test_farm_ids_match_the_farms_listing(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        user = await factories.create_user(session)
+        region = await factories.create_region(session)
+        for name in ["Uno", "Dos", "Tres"]:
+            await factories.create_farm(session, user, region, name)
+
+        detail = await client.get(f"/users/{user.id}")
+        listing = await client.get("/farms", params={"user_id": str(user.id)})
+
+        assert detail.json()["farm_ids"] == [farm["id"] for farm in listing.json()]
+
+    async def test_farm_ids_follow_the_farms_created_and_deleted_through_the_api(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        user = await factories.create_user(session)
+        region = await factories.create_region(session)
+        payload = {"user_id": str(user.id), "region_id": str(region.id), "name": "Campo"}
+
+        farm = (await client.post("/farms", json=payload)).json()
+        with_farm = await client.get(f"/users/{user.id}")
+        await client.delete(f"/farms/{farm['id']}")
+        without_farm = await client.get(f"/users/{user.id}")
+
+        assert with_farm.json()["farm_ids"] == [farm["id"]]
+        assert without_farm.json()["farm_ids"] == []
+
+    async def test_list_and_create_do_not_include_farm_ids(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        user = await factories.create_user(session)
+        region = await factories.create_region(session)
+        await factories.create_farm(session, user, region)
+
+        created = await client.post("/users", json={"name": "Nuevo"})
+        listing = await client.get("/users")
+
+        assert set(created.json()) == {"id", "name"}
+        assert all(set(item) == {"id", "name"} for item in listing.json())
 
     async def test_returns_only_the_requested_user(
         self, client: AsyncClient, session: AsyncSession

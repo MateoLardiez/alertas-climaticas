@@ -16,3 +16,9 @@ class UserRead(BaseModel):
 
     id: uuid.UUID
     name: str
+
+
+class UserDetailRead(UserRead):
+    """Detalle de un usuario: ademas de sus datos, los ids de sus campos."""
+
+    farm_ids: list[uuid.UUID]

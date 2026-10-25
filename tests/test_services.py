@@ -53,6 +53,37 @@ class TestUserServiceReading:
 
         assert (error.value.resource, error.value.resource_id) == ("User", unknown)
 
+    async def test_get_user_detail_has_no_farms_for_a_new_user(
+        self, session: AsyncSession
+    ) -> None:
+        created = await factories.create_user(session, "Mateo")
+
+        detail = await user_service.get_user_detail(session, created.id)
+
+        assert (detail.id, detail.name, detail.farm_ids) == (created.id, "Mateo", [])
+
+    async def test_get_user_detail_lists_only_its_own_farm_ids_sorted_by_name(
+        self, session: AsyncSession
+    ) -> None:
+        mine = await factories.create_user(session, "Yo")
+        other = await factories.create_user(session, "Otro")
+        region = await factories.create_region(session)
+        zeta = await factories.create_farm(session, mine, region, "Zeta")
+        alfa = await factories.create_farm(session, mine, region, "Alfa")
+        await factories.create_farm(session, other, region, "Ajeno")
+
+        detail = await user_service.get_user_detail(session, mine.id)
+
+        assert detail.farm_ids == [alfa.id, zeta.id]
+
+    async def test_get_user_detail_rejects_an_unknown_user(self, session: AsyncSession) -> None:
+        unknown = uuid.uuid4()
+
+        with pytest.raises(NotFoundError) as error:
+            await user_service.get_user_detail(session, unknown)
+
+        assert (error.value.resource, error.value.resource_id) == ("User", unknown)
+
     async def test_list_users_is_empty_without_users(self, session: AsyncSession) -> None:
         assert list(await user_service.list_users(session)) == []
 

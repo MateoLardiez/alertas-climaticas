@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from alertas_climaticas.schemas.farm import FarmCreate, FarmRead, FarmUpdate
 from alertas_climaticas.schemas.region import RegionRead
-from alertas_climaticas.schemas.user import UserCreate, UserRead
+from alertas_climaticas.schemas.user import UserCreate, UserDetailRead, UserRead
 
 
 def test_user_create_accepts_a_valid_name() -> None:
@@ -52,6 +52,22 @@ def test_user_read_is_built_from_a_model_object() -> None:
     assert user.id == obj.id
     assert user.name == "Mateo"
     assert set(user.model_dump()) == {"id", "name"}
+
+
+def test_user_detail_read_extends_user_read_with_farm_ids() -> None:
+    farm_id = uuid.uuid4()
+    obj = SimpleNamespace(id=uuid.uuid4(), name="Mateo", farm_ids=[farm_id])
+
+    detail = UserDetailRead.model_validate(obj)
+
+    assert issubclass(UserDetailRead, UserRead)
+    assert detail.farm_ids == [farm_id]
+    assert set(detail.model_dump()) == {"id", "name", "farm_ids"}
+
+
+def test_user_detail_read_requires_farm_ids() -> None:
+    with pytest.raises(ValidationError):
+        UserDetailRead.model_validate(SimpleNamespace(id=uuid.uuid4(), name="Mateo"))
 
 
 def _farm_data(**overrides: object) -> dict[str, object]:
