@@ -190,6 +190,33 @@ uv run python -m alertas_climaticas.jobs.alert_evaluation
 ```
 Es seguro ejecutarlo cuando se quiera, incluso con la API corriendo: no duplica notificaciones.
 
+## Notificaciones
+
+Cada usuario consulta sus notificaciones con dos endpoints. En ambos solo se consideran las de **hoy en adelante** (por la fecha del pronostico, en la zona `TIMEZONE`): las de dias pasados ya no sirven y no se devuelven ni se modifican.
+
+| Endpoint | Que hace |
+|---|---|
+| `GET /notifications?user_id=...` | Historial desde hoy. **No modifica nada.** `read=false` deja solo las no leidas, `read=true` solo las leidas |
+| `POST /notifications/consume?user_id=...` | Devuelve las notificaciones **nuevas** (sin leer, desde hoy) y las marca como leidas en el mismo paso |
+
+El cliente (por ejemplo, el bot de WhatsApp) llama a `consume` y recibe solo lo nuevo, sin un segundo paso para marcarlas. El `GET` queda libre de efectos secundarios, como corresponde a este metodo HTTP, y sirve para ver el historial.
+
+Cada notificacion trae los datos y el mensaje ya armado:
+
+```json
+{
+  "id": "…", "alert_id": "…",
+  "farm_name": "La Esperanza", "event": "lluvia",
+  "forecast_date": "2026-10-28", "probability": 80,
+  "read": false, "read_at": null, "created_at": "…",
+  "message": "Alerta de lluvia en La Esperanza: 80% de probabilidad el 28/10/2026"
+}
+```
+El mensaje no incluye el umbral: la alerta se puede editar despues y el texto quedaria inexacto.
+
+- **Una sola entrega por notificacion:** `consume` es un unico `UPDATE ... WHERE read_at IS NULL ... RETURNING`. Si dos consumidores piden a la vez, PostgreSQL le entrega cada notificacion a uno solo
+- **Sin control de duenio:** como no hay autenticacion, el usuario se indica con `user_id`. Un usuario inexistente devuelve una lista vacia
+
 ## Compilar y ejecutar
 
 ### Local
@@ -292,6 +319,8 @@ Cosas que quedaron fuera de alcance a proposito, para mantener el challenge simp
 - **Job en un proceso aparte:** hoy el scheduler corre dentro de la API. Un worker propio (por ejemplo, otro contenedor que reutilice `run_evaluation`) aislaria el job de la API, que podria reiniciarse o escalar sin afectarlo
 - **Recuperar la corrida perdida:** si la app esta apagada a las 6:00, hoy se espera a la manana siguiente. Un almacen de jobs persistente o una evaluacion al arrancar lo resolverian
 - **Guardar el resultado de cada corrida del job:** hoy el resultado (cuantas notificaciones se crearon, o el error) solo sale en los logs, que no se conservan. Registrar cada ejecucion (fecha, duracion, cantidad creada, error) en una tabla o en un archivo de logs rotado daria trazabilidad del flujo y permitiria saber si una corrida de las 6:00 se perdio o fallo
+- **Confirmar la entrega antes de marcar como leida:** `POST /notifications/consume` marca las notificaciones al devolverlas. Si la respuesta se pierde en el camino, el usuario no la recibe y queda como leida (entrega "a lo sumo una vez"). Una confirmacion explicita del cliente (por ejemplo, un `PATCH` despues de enviar el mensaje por WhatsApp) daria entrega "al menos una vez"
+- **Paginacion de notificaciones** y limpieza de las vencidas: hoy se filtran por fecha pero siguen guardadas
 - **Advisory lock:** con varias instancias de la API, cada una corre el job. No genera duplicados (lo evita `ON CONFLICT`), pero repite trabajo. Un lock de PostgreSQL (`pg_try_advisory_lock`) haria que solo una instancia evalue
 - **Re-notificar cambios importantes del pronostico:** si la probabilidad sube mucho despues de avisar, hoy no se vuelve a notificar
 - **Umbrales por magnitud:** ademas de la probabilidad, alertar por milimetros de lluvia o grados de temperatura

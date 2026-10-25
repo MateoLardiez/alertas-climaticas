@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from alertas_climaticas.config import get_settings
 from alertas_climaticas.exceptions import AlreadyExistsError, NotFoundError
 from alertas_climaticas.jobs.alert_evaluation import create_scheduler
-from alertas_climaticas.routers import alerts, events, farms, regions, users
+from alertas_climaticas.routers import alerts, events, farms, notifications, regions, users
 
 
 @asynccontextmanager
@@ -36,6 +36,7 @@ app.include_router(regions.router)
 app.include_router(events.router)
 app.include_router(farms.router)
 app.include_router(alerts.router)
+app.include_router(notifications.router)
 
 
 @app.exception_handler(NotFoundError)

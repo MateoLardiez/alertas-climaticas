@@ -1,6 +1,7 @@
 """Tests de los schemas Pydantic: validacion de entrada y lectura desde objetos del modelo."""
 
 import uuid
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,7 @@ from pydantic import ValidationError
 from alertas_climaticas.schemas.alert import AlertCreate, AlertRead, AlertUpdate
 from alertas_climaticas.schemas.event import EventRead
 from alertas_climaticas.schemas.farm import FarmCreate, FarmRead, FarmUpdate
+from alertas_climaticas.schemas.notification import NotificationRead
 from alertas_climaticas.schemas.region import RegionRead
 from alertas_climaticas.schemas.user import UserCreate, UserDetailRead, UserRead
 
@@ -265,3 +267,84 @@ def test_event_read_is_built_from_a_model_object() -> None:
 
     assert (event.id, event.name) == (obj.id, "lluvia")
     assert set(event.model_dump()) == {"id", "name"}
+
+
+def _notification_data(**overrides: object) -> dict[str, object]:
+    data: dict[str, object] = {
+        "id": uuid.uuid4(),
+        "alert_id": uuid.uuid4(),
+        "farm_name": "La Esperanza",
+        "event": "lluvia",
+        "forecast_date": date(2026, 3, 5),
+        "probability": 80,
+        "read_at": None,
+        "created_at": datetime(2026, 3, 1, 6, 0, tzinfo=timezone.utc),
+    }
+    return data | overrides
+
+
+def test_notification_read_builds_a_readable_message() -> None:
+    notification = NotificationRead.model_validate(_notification_data())
+
+    assert notification.message == (
+        "Alerta de lluvia en La Esperanza: 80% de probabilidad el 05/03/2026"
+    )
+
+
+@pytest.mark.parametrize(
+    ("event", "farm", "probability", "forecast_date", "expected"),
+    [
+        ("helada", "Campo Sur", 100, date(2026, 12, 25), "Alerta de helada en Campo Sur: 100% de probabilidad el 25/12/2026"),
+        ("tormenta", "El Ombu", 0, date(2026, 1, 9), "Alerta de tormenta en El Ombu: 0% de probabilidad el 09/01/2026"),
+        ("calor extremo", "Los Alamos", 60, date(2026, 2, 28), "Alerta de calor extremo en Los Alamos: 60% de probabilidad el 28/02/2026"),
+    ],
+)
+def test_notification_message_uses_day_month_year_and_the_event_and_farm_names(
+    event: str, farm: str, probability: int, forecast_date: date, expected: str
+) -> None:
+    data = _notification_data(
+        event=event, farm_name=farm, probability=probability, forecast_date=forecast_date
+    )
+
+    assert NotificationRead.model_validate(data).message == expected
+
+
+def test_notification_message_does_not_mention_the_threshold() -> None:
+    message = NotificationRead.model_validate(_notification_data()).message
+
+    assert "umbral" not in message.lower()
+
+
+def test_notification_is_unread_without_read_at_and_read_with_it() -> None:
+    unread = NotificationRead.model_validate(_notification_data())
+    read = NotificationRead.model_validate(
+        _notification_data(read_at=datetime(2026, 3, 2, tzinfo=timezone.utc))
+    )
+
+    assert unread.read is False
+    assert read.read is True
+
+
+def test_notification_dump_includes_the_computed_fields() -> None:
+    dumped = NotificationRead.model_validate(_notification_data()).model_dump()
+
+    assert set(dumped) == {
+        "id",
+        "alert_id",
+        "farm_name",
+        "event",
+        "forecast_date",
+        "probability",
+        "read_at",
+        "created_at",
+        "read",
+        "message",
+    }
+
+
+def test_notification_read_is_built_from_a_row_like_object() -> None:
+    row = SimpleNamespace(**_notification_data())
+
+    notification = NotificationRead.model_validate(row)
+
+    assert notification.farm_name == "La Esperanza"
