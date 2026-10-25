@@ -136,6 +136,71 @@ WHERE (heat.probability >= 60 AND frost.probability > 0)
 
 ### Local
 
+#### Requisitos
+- Python 3.12 o superior
+- [uv](https://docs.astral.sh/uv/) (gestor de dependencias)
+- Docker (para PostgreSQL)
+
+#### Pasos
+
+1. **Instalar las dependencias**
+   ```
+   uv sync
+   ```
+
+2. **Levantar PostgreSQL**
+   ```
+   docker run -d --name alertas-db \
+     -e POSTGRES_USER=alertas -e POSTGRES_PASSWORD=alertas -e POSTGRES_DB=alertas \
+     -p 5433:5432 -v alertas-pgdata:/var/lib/postgresql/data postgres:16
+   ```
+   Se publica en el puerto **5433** del host para no chocar con un PostgreSQL instalado en el sistema, que suele usar el 5432. Los datos quedan en el volumen `alertas-pgdata`, por lo que sobreviven si se borra el contenedor.
+
+   Si ya existe pero esta detenido (por ejemplo, despues de reiniciar la maquina): `docker start alertas-db`.
+
+3. **Configurar las variables de entorno**
+   ```
+   cp .env.example .env
+   ```
+   El `.env.example` ya apunta al contenedor del paso anterior. El `.env` no se sube a git.
+
+4. **Aplicar las migraciones**
+   ```
+   uv run alembic upgrade head
+   ```
+
+5. **Cargar los datos meteorologicos mockeados** (ver [Seed de Datos Meteorologicos](#seed-de-datos-meteorologicos))
+   ```
+   uv run python -m alertas_climaticas.seed
+   ```
+
+6. **Levantar la API**
+   ```
+   uv run uvicorn alertas_climaticas.main:app --reload
+   ```
+   `--reload` reinicia el servidor cada vez que se guarda un cambio. Es util para desarrollar y se puede omitir.
+
+#### Ver la documentacion de la API (Swagger)
+
+Con la API corriendo, abrir en el navegador:
+
+| URL | Que es |
+|---|---|
+| http://localhost:8000/docs | Swagger UI: lista los endpoints y permite probarlos desde el navegador |
+| http://localhost:8000/redoc | La misma documentacion en formato de lectura (ReDoc) |
+| http://localhost:8000/openapi.json | El esquema OpenAPI en JSON |
+
+Las paginas `/docs` y `/redoc` cargan sus archivos desde un CDN, por lo que necesitan conexion a internet y que ningun bloqueador del navegador los frene. Si la pagina queda en blanco, `/openapi.json` y los endpoints siguen funcionando.
+
+**Flujo de prueba en Swagger:**
+1. `POST /users` con `{"name": "Mateo"}` y copiar el `id` de la respuesta
+2. `GET /regions` y copiar el `id` de una region
+3. `POST /farms` con `user_id`, `region_id` y `name`
+4. `GET /farms/{farm_id}` con el `id` del campo creado
+
+#### Ejecutar los tests
+Ver la seccion [Tests](#tests).
+
 ### Docker
 
 ## Tests
