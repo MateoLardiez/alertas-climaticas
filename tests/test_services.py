@@ -1,16 +1,20 @@
 """Tests de los services, sin pasar por HTTP."""
 
 import uuid
+from datetime import date
 
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from alertas_climaticas.database.session import async_session_factory
-from alertas_climaticas.exceptions import NotFoundError
-from alertas_climaticas.models import Alert, Farm, User
+from alertas_climaticas.exceptions import AlreadyExistsError, NotFoundError
+from alertas_climaticas.models import Alert, Event, Farm, Notification, User
+from alertas_climaticas.schemas.alert import AlertCreate, AlertUpdate
 from alertas_climaticas.schemas.farm import FarmCreate, FarmUpdate
 from alertas_climaticas.schemas.user import UserCreate
+from alertas_climaticas.services import alerts as alert_service
+from alertas_climaticas.services import events as event_service
 from alertas_climaticas.services import farms as farm_service
 from alertas_climaticas.services import regions as region_service
 from alertas_climaticas.services import users as user_service
@@ -286,3 +290,167 @@ class TestFarmServiceManagement:
             await farm_service.delete_farm(session, unknown)
 
         assert (error.value.resource, error.value.resource_id) == ("Farm", unknown)
+
+
+class TestEventService:
+    async def test_list_events_is_sorted_by_name(self, session: AsyncSession) -> None:
+        for name in ["tormenta", "helada", "lluvia"]:
+            await factories.create_event(session, name)
+
+        events = await event_service.list_events(session)
+
+        assert [event.name for event in events] == ["helada", "lluvia", "tormenta"]
+
+    async def test_list_events_is_empty_without_events(self, session: AsyncSession) -> None:
+        assert list(await event_service.list_events(session)) == []
+
+
+class TestAlertService:
+    async def _farm_and_event(self, session: AsyncSession) -> tuple[Farm, Event]:
+        user = await factories.create_user(session)
+        region = await factories.create_region(session)
+        return (
+            await factories.create_farm(session, user, region),
+            await factories.create_event(session, "lluvia"),
+        )
+
+    async def _count_alerts(self, session: AsyncSession) -> int:
+        return await session.scalar(select(func.count()).select_from(Alert)) or 0
+
+    async def test_create_alert_returns_the_saved_alert(self, session: AsyncSession) -> None:
+        farm, event = await self._farm_and_event(session)
+
+        alert = await alert_service.create_alert(
+            session, AlertCreate(farm_id=farm.id, event_id=event.id, threshold=60)
+        )
+
+        assert isinstance(alert.id, uuid.UUID)
+        assert (alert.farm_id, alert.event_id, alert.threshold) == (farm.id, event.id, 60)
+
+    async def test_create_alert_commits_the_alert(self, session: AsyncSession) -> None:
+        farm, event = await self._farm_and_event(session)
+
+        alert = await alert_service.create_alert(
+            session, AlertCreate(farm_id=farm.id, event_id=event.id, threshold=60)
+        )
+
+        async with async_session_factory() as other_session:
+            assert await other_session.get(Alert, alert.id) is not None
+
+    async def test_create_alert_rejects_a_duplicate_without_touching_the_original(
+        self, session: AsyncSession
+    ) -> None:
+        farm, event = await self._farm_and_event(session)
+        original = await alert_service.create_alert(
+            session, AlertCreate(farm_id=farm.id, event_id=event.id, threshold=40)
+        )
+
+        with pytest.raises(AlreadyExistsError):
+            await alert_service.create_alert(
+                session, AlertCreate(farm_id=farm.id, event_id=event.id, threshold=90)
+            )
+
+        assert await self._count_alerts(session) == 1
+        assert original.threshold == 40
+        async with async_session_factory() as other_session:
+            saved = await other_session.get(Alert, original.id)
+            assert saved is not None
+            assert saved.threshold == 40
+
+    async def test_create_alert_rejects_an_unknown_farm(self, session: AsyncSession) -> None:
+        _, event = await self._farm_and_event(session)
+        unknown = uuid.uuid4()
+
+        with pytest.raises(NotFoundError) as error:
+            await alert_service.create_alert(
+                session, AlertCreate(farm_id=unknown, event_id=event.id, threshold=60)
+            )
+
+        assert (error.value.resource, error.value.resource_id) == ("Farm", unknown)
+
+    async def test_create_alert_rejects_an_unknown_event(self, session: AsyncSession) -> None:
+        farm, _ = await self._farm_and_event(session)
+        unknown = uuid.uuid4()
+
+        with pytest.raises(NotFoundError) as error:
+            await alert_service.create_alert(
+                session, AlertCreate(farm_id=farm.id, event_id=unknown, threshold=60)
+            )
+
+        assert (error.value.resource, error.value.resource_id) == ("Event", unknown)
+        assert await self._count_alerts(session) == 0
+
+    async def test_get_alert_returns_the_alert(self, session: AsyncSession) -> None:
+        farm, event = await self._farm_and_event(session)
+        created = await factories.create_alert(session, farm, event)
+
+        alert = await alert_service.get_alert(session, created.id)
+
+        assert alert.id == created.id
+
+    async def test_get_alert_rejects_an_unknown_alert(self, session: AsyncSession) -> None:
+        unknown = uuid.uuid4()
+
+        with pytest.raises(NotFoundError) as error:
+            await alert_service.get_alert(session, unknown)
+
+        assert (error.value.resource, error.value.resource_id) == ("Alert", unknown)
+
+    async def test_list_alerts_filters_by_farm_and_sorts_by_event_name(
+        self, session: AsyncSession
+    ) -> None:
+        farm, rain = await self._farm_and_event(session)
+        frost = await factories.create_event(session, "helada")
+        other_user = await factories.create_user(session, "Otro")
+        other_region = await factories.create_region(session, "Otra")
+        other_farm = await factories.create_farm(session, other_user, other_region)
+        rain_alert = await factories.create_alert(session, farm, rain)
+        frost_alert = await factories.create_alert(session, farm, frost)
+        await factories.create_alert(session, other_farm, rain)
+
+        alerts = await alert_service.list_alerts(session, farm.id)
+
+        assert [alert.id for alert in alerts] == [frost_alert.id, rain_alert.id]
+
+    async def test_list_alerts_is_empty_for_an_unknown_farm(self, session: AsyncSession) -> None:
+        assert list(await alert_service.list_alerts(session, uuid.uuid4())) == []
+
+    async def test_update_alert_changes_only_the_threshold(self, session: AsyncSession) -> None:
+        farm, event = await self._farm_and_event(session)
+        created = await factories.create_alert(session, farm, event, 50)
+
+        updated = await alert_service.update_alert(session, created.id, AlertUpdate(threshold=80))
+
+        assert (updated.threshold, updated.farm_id, updated.event_id) == (80, farm.id, event.id)
+        async with async_session_factory() as other_session:
+            saved = await other_session.get(Alert, created.id)
+            assert saved is not None
+            assert saved.threshold == 80
+
+    async def test_update_alert_rejects_an_unknown_alert(self, session: AsyncSession) -> None:
+        unknown = uuid.uuid4()
+
+        with pytest.raises(NotFoundError) as error:
+            await alert_service.update_alert(session, unknown, AlertUpdate(threshold=80))
+
+        assert (error.value.resource, error.value.resource_id) == ("Alert", unknown)
+
+    async def test_delete_alert_removes_it_and_its_notifications(
+        self, session: AsyncSession
+    ) -> None:
+        farm, event = await self._farm_and_event(session)
+        alert = await factories.create_alert(session, farm, event)
+        await factories.create_notification(session, alert, date(2026, 1, 15))
+
+        await alert_service.delete_alert(session, alert.id)
+
+        assert await self._count_alerts(session) == 0
+        assert await session.scalar(select(func.count()).select_from(Notification)) == 0
+
+    async def test_delete_alert_rejects_an_unknown_alert(self, session: AsyncSession) -> None:
+        unknown = uuid.uuid4()
+
+        with pytest.raises(NotFoundError) as error:
+            await alert_service.delete_alert(session, unknown)
+
+        assert (error.value.resource, error.value.resource_id) == ("Alert", unknown)

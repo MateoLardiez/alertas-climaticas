@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
+from alertas_climaticas.schemas.alert import AlertCreate, AlertRead, AlertUpdate
+from alertas_climaticas.schemas.event import EventRead
 from alertas_climaticas.schemas.farm import FarmCreate, FarmRead, FarmUpdate
 from alertas_climaticas.schemas.region import RegionRead
 from alertas_climaticas.schemas.user import UserCreate, UserDetailRead, UserRead
@@ -189,3 +191,77 @@ def test_region_read_is_built_from_a_model_object() -> None:
     assert region.id == obj.id
     assert region.name == "Tandil"
     assert set(region.model_dump()) == {"id", "name"}
+
+
+def _alert_data(**overrides: object) -> dict[str, object]:
+    data: dict[str, object] = {
+        "farm_id": uuid.uuid4(),
+        "event_id": uuid.uuid4(),
+        "threshold": 60,
+    }
+    return data | overrides
+
+
+@pytest.mark.parametrize("threshold", [0, 1, 60, 99, 100])
+def test_alert_create_accepts_thresholds_from_0_to_100(threshold: int) -> None:
+    assert AlertCreate.model_validate(_alert_data(threshold=threshold)).threshold == threshold
+
+
+@pytest.mark.parametrize("threshold", [-1, 101, "60", 60.5, 60.0, True, None, [], "abc"])
+def test_alert_create_rejects_invalid_thresholds(threshold: object) -> None:
+    with pytest.raises(ValidationError):
+        AlertCreate.model_validate(_alert_data(threshold=threshold))
+
+
+@pytest.mark.parametrize("field", ["farm_id", "event_id", "threshold"])
+def test_alert_create_requires_every_field(field: str) -> None:
+    data = _alert_data()
+    del data[field]
+
+    with pytest.raises(ValidationError):
+        AlertCreate.model_validate(data)
+
+
+@pytest.mark.parametrize("field", ["farm_id", "event_id"])
+def test_alert_create_rejects_invalid_ids(field: str) -> None:
+    with pytest.raises(ValidationError):
+        AlertCreate.model_validate(_alert_data(**{field: "no-es-un-uuid"}))
+
+
+def test_alert_create_has_no_id_field() -> None:
+    assert "id" not in AlertCreate.model_fields
+
+
+def test_alert_update_only_accepts_the_threshold() -> None:
+    assert AlertUpdate(threshold=80).threshold == 80
+    assert set(AlertUpdate.model_fields) == {"threshold"}
+
+
+@pytest.mark.parametrize("data", [{}, {"threshold": None}, {"threshold": 101}, {"threshold": "80"}])
+def test_alert_update_rejects_invalid_payloads(data: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        AlertUpdate.model_validate(data)
+
+
+@pytest.mark.parametrize("extra", ["farm_id", "event_id", "id", "desconocido"])
+def test_alert_update_rejects_fields_that_cannot_be_changed(extra: str) -> None:
+    with pytest.raises(ValidationError):
+        AlertUpdate.model_validate({"threshold": 80, extra: str(uuid.uuid4())})
+
+
+def test_alert_read_is_built_from_a_model_object() -> None:
+    obj = SimpleNamespace(id=uuid.uuid4(), farm_id=uuid.uuid4(), event_id=uuid.uuid4(), threshold=70)
+
+    alert = AlertRead.model_validate(obj)
+
+    assert set(alert.model_dump()) == {"id", "farm_id", "event_id", "threshold"}
+    assert alert.threshold == 70
+
+
+def test_event_read_is_built_from_a_model_object() -> None:
+    obj = SimpleNamespace(id=uuid.uuid4(), name="lluvia")
+
+    event = EventRead.model_validate(obj)
+
+    assert (event.id, event.name) == (obj.id, "lluvia")
+    assert set(event.model_dump()) == {"id", "name"}

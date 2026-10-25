@@ -2,7 +2,7 @@
 
 import uuid
 
-from alertas_climaticas.exceptions import NotFoundError
+from alertas_climaticas.exceptions import AlreadyExistsError, NotFoundError
 
 
 def test_not_found_error_keeps_the_resource_and_its_id() -> None:
@@ -23,3 +23,12 @@ def test_not_found_error_message_names_the_resource_and_id() -> None:
 def test_not_found_error_is_a_plain_exception_without_http_knowledge() -> None:
     assert issubclass(NotFoundError, Exception)
     assert not hasattr(NotFoundError, "status_code")
+
+
+def test_already_exists_error_carries_its_message() -> None:
+    assert str(AlreadyExistsError("An alert already exists")) == "An alert already exists"
+
+
+def test_already_exists_error_is_a_plain_exception_without_http_knowledge() -> None:
+    assert issubclass(AlreadyExistsError, Exception)
+    assert not hasattr(AlreadyExistsError, "status_code")

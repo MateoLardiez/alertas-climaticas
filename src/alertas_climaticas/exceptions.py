@@ -10,3 +10,7 @@ class NotFoundError(Exception):
         self.resource = resource
         self.resource_id = resource_id
         super().__init__(f"{resource} {resource_id} not found")
+
+
+class AlreadyExistsError(Exception):
+    """El recurso que se quiere crear ya existe (viola una restriccion de unicidad)."""
