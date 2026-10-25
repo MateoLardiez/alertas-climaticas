@@ -7,6 +7,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from alertas_climaticas import seed
+from alertas_climaticas.clock import current_date
+from alertas_climaticas.config import get_settings
 from alertas_climaticas.database.session import async_session_factory, engine
 from alertas_climaticas.models import Alert, Event, Notification, Region, WeatherForecast
 from alertas_climaticas.services.evaluation import FORECAST_WINDOW_DAYS, evaluate_alerts
@@ -369,7 +371,7 @@ async def test_evaluating_the_seeded_forecast_matches_an_independent_calculation
     session: AsyncSession,
 ) -> None:
     await seed.seed()
-    today = date.today()
+    today = current_date(get_settings().timezone)
     user = await factories.create_user(session)
     region = (await session.scalars(select(Region).order_by(Region.name))).first()
     assert region is not None

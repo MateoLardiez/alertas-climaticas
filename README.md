@@ -163,6 +163,32 @@ INSERT INTO notification (alert_id, forecast_date, probability)
 - **Sin deadlocks:** el `ORDER BY` hace que toda ejecucion inserte las filas en el mismo orden, por lo que dos ejecuciones simultaneas no se bloquean entre si
 - **Snapshot:** la notificacion guarda la probabilidad del momento. Si el pronostico cambia despues, no se vuelve a avisar ni se modifica
 
+### Ejecucion periodica
+El job se programa con **APScheduler** (`AsyncIOScheduler`) dentro del `lifespan` de la app: arranca junto con la API y se detiene al apagarla. Se ejecuta como una tarea aparte, por lo que ningun endpoint espera a que se evalue. Corre **una vez por dia, a las 6:00 hora Argentina**.
+
+- **Una vez por dia:** a las 6:00 (`EVALUATION_HOUR`, en la zona `TIMEZONE`), con un disparador `cron` de APScheduler. Una alerta creada durante el dia se evalua en la corrida de la manana siguiente
+- **Al arrancar no corre:** si la app estaba apagada a las 6:00, esa corrida no se recupera (el scheduler no guarda estado). Se puede forzar a mano, ver abajo
+- **`max_instances=1`:** nunca hay dos evaluaciones a la vez en el proceso
+- **`coalesce`:** si se acumulan corridas atrasadas, se ejecuta una sola
+- **Errores:** un fallo (por ejemplo, la base no responde) se registra con su detalle y no detiene las siguientes corridas. La siguiente es el reintento
+- **"Hoy":** se calcula en la zona `TIMEZONE`, no en la del servidor. Los pronosticos son por dia de campos en Buenos Aires, y con UTC la ventana quedaria corrida un dia entre las 21:00 y las 24:00
+- **Aislamiento:** el scheduler corre en el mismo proceso que la API. Separarlo en un proceso propio esta en [Mejoras](#mejoras)
+
+| Variable | Por defecto | Que controla |
+|---|---|---|
+| `EVALUATION_JOB_ENABLED` | `true` | Si la app arranca el job. En `.env.test` es `false` |
+| `EVALUATION_HOUR` | `6` | Hora del dia (0 a 23) a la que corre, en la zona `TIMEZONE` |
+| `TIMEZONE` | `America/Argentina/Buenos_Aires` | Zona que define "hoy". Se valida al arrancar |
+
+En los logs de la app se ve cada corrida: `Alert evaluation for 2026-10-25 created 7 notifications`.
+
+### Ejecutar una evaluacion a mano
+Sirve para probar sin esperar a las 6:00, o para recuperar una corrida perdida. Evalua una vez, muestra cuantas notificaciones creo y termina:
+
+```
+uv run python -m alertas_climaticas.jobs.alert_evaluation
+```
+Es seguro ejecutarlo cuando se quiera, incluso con la API corriendo: no duplica notificaciones.
 
 ## Compilar y ejecutar
 
@@ -258,6 +284,19 @@ uv run pytest -m "not db"      # solo los que no necesitan la base
 
 ## Estructura del Sistema
 
+
+## Mejoras
+
+Cosas que quedaron fuera de alcance a proposito, para mantener el challenge simple:
+
+- **Job en un proceso aparte:** hoy el scheduler corre dentro de la API. Un worker propio (por ejemplo, otro contenedor que reutilice `run_evaluation`) aislaria el job de la API, que podria reiniciarse o escalar sin afectarlo
+- **Recuperar la corrida perdida:** si la app esta apagada a las 6:00, hoy se espera a la manana siguiente. Un almacen de jobs persistente o una evaluacion al arrancar lo resolverian
+- **Guardar el resultado de cada corrida del job:** hoy el resultado (cuantas notificaciones se crearon, o el error) solo sale en los logs, que no se conservan. Registrar cada ejecucion (fecha, duracion, cantidad creada, error) en una tabla o en un archivo de logs rotado daria trazabilidad del flujo y permitiria saber si una corrida de las 6:00 se perdio o fallo
+- **Advisory lock:** con varias instancias de la API, cada una corre el job. No genera duplicados (lo evita `ON CONFLICT`), pero repite trabajo. Un lock de PostgreSQL (`pg_try_advisory_lock`) haria que solo una instancia evalue
+- **Re-notificar cambios importantes del pronostico:** si la probabilidad sube mucho despues de avisar, hoy no se vuelve a notificar
+- **Umbrales por magnitud:** ademas de la probabilidad, alertar por milimetros de lluvia o grados de temperatura
+- **Autenticacion y autorizacion:** hoy el usuario se identifica con su `id` y cualquiera puede consultar o modificar cualquier recurso
+- **Paginacion** en los listados (`GET /users`, `GET /farms`, `GET /alerts`)
 
 ## Anexo: Codigo DBML
 

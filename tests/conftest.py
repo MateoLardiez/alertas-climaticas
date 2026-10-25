@@ -22,7 +22,9 @@ TEST_DB_NAME = str(make_url(TEST_DATABASE_URL).database)
 assert TEST_DB_NAME.endswith("_test"), f"La base de tests debe terminar en _test: {TEST_DB_NAME}"
 
 # Debe fijarse antes de importar la app: el engine se crea al importar el modulo de sesion.
-os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+# Se carga todo .env.test (no solo la URL) para no depender del .env de desarrollo.
+for key, value in dotenv_values(ROOT / ".env.test").items():
+    os.environ[key] = str(value)
 
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402

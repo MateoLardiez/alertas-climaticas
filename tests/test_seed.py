@@ -7,6 +7,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from alertas_climaticas import seed
+from alertas_climaticas.clock import current_date
+from alertas_climaticas.config import get_settings
 from alertas_climaticas.models import Event, Region, WeatherForecast
 
 
@@ -30,14 +32,15 @@ async def test_seed_loads_regions_events_and_forecasts(session: AsyncSession) ->
 
 async def test_seed_covers_the_configured_window_starting_today(session: AsyncSession) -> None:
     await seed.seed()
+    today = current_date(get_settings().timezone)
 
     first, last = (
         await session.execute(
             select(func.min(WeatherForecast.forecast_date), func.max(WeatherForecast.forecast_date))
         )
     ).one()
-    assert first == date.today()
-    assert last == date.today() + timedelta(days=seed.DAYS - 1)
+    assert first == today
+    assert last == today + timedelta(days=seed.DAYS - 1)
 
 
 async def test_seed_gives_every_region_every_event_every_day(session: AsyncSession) -> None:

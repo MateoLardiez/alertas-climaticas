@@ -7,6 +7,8 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
+from alertas_climaticas.clock import current_date
+from alertas_climaticas.config import get_settings
 from alertas_climaticas.database.session import async_session_factory, engine
 from alertas_climaticas.models import Event, Region, WeatherForecast
 
@@ -83,7 +85,7 @@ def generate_region_forecast(
 
 async def seed() -> None:
     rng = random.Random(RNG_SEED)
-    start = date.today()
+    start = current_date(get_settings().timezone)
 
     async with async_session_factory() as session:
         await session.execute(
