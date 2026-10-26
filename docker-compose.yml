@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # La app espera a que esto pase antes de arrancar (depends_on: service_healthy).
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Fijos: dentro de la red de compose la base es el servicio "db", en su puerto interno.
+      DB_HOST: db
+      DB_PORT: 5432
+      # Salen del .env, igual que en el servicio db.
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      TIMEZONE: ${TIMEZONE:-America/Argentina/Buenos_Aires}
+      EVALUATION_JOB_ENABLED: ${EVALUATION_JOB_ENABLED:-true}
+      EVALUATION_HOUR: ${EVALUATION_HOUR:-6}
+    # PORT del .env es el puerto del host; dentro del contenedor la API siempre escucha en 8000.
+    ports:
+      - "${PORT:-8000}:8000"
+    # Migraciones primero; si fallan, la app no arranca. exec deja a uvicorn como proceso principal.
+    command: ["sh", "-c", "alembic upgrade head && exec uvicorn alertas_climaticas.main:app --host 0.0.0.0 --port 8000"]
+
+volumes:
+  pgdata:

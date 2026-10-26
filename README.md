@@ -300,6 +300,37 @@ Ver la seccion [Tests](#tests).
 
 ### Docker
 
+Levanta la base y la API juntas, sin instalar Python ni PostgreSQL. Solo hace falta Docker con Compose.
+
+1. **Configurar las variables de entorno**
+   ```
+   cp .env.example .env
+   ```
+   Compose usa `DB_USER`, `DB_PASSWORD` y `DB_NAME` del `.env` para crear la base y para conectar la app, asi las credenciales se escriben una sola vez. `DB_HOST` y `DB_PORT` no hacen falta: compose los fija en `db` y `5432`, la base dentro de su red. El resto de las variables (`TIMEZONE`, `EVALUATION_*`) es opcional.
+
+2. **Levantar todo**
+   ```
+   docker compose up --build
+   ```
+   El orden es: Postgres arranca y espera a estar listo (`healthcheck`), luego la app aplica las migraciones (`alembic upgrade head`) y recien despues levanta la API. Si una migracion falla, la API no arranca. La API queda en `http://localhost:8000` (`PORT` en el `.env` cambia el puerto del host) y la documentacion en `/docs`.
+
+3. **Cargar los datos meteorologicos mockeados** (en otra terminal)
+   ```
+   docker compose exec app python -m alertas_climaticas.seed
+   ```
+   No se carga solo al arrancar, para que reiniciar la app no toque los datos.
+
+Comandos utiles:
+
+| Comando | Que hace |
+|---|---|
+| `docker compose logs -f app` | Logs de la app, incluidas las corridas del job |
+| `docker compose exec app python -m alertas_climaticas.jobs.alert_evaluation` | Fuerza una evaluacion de alertas |
+| `docker compose down` | Detiene y borra los contenedores. Los datos se conservan |
+| `docker compose down -v` | Ademas borra el volumen `pgdata`: la base queda vacia |
+
+La base no se publica al host, solo la ve la app. Para conectarse con un cliente SQL: `docker compose exec db psql -U <DB_USER> <DB_NAME>`.
+
 ## Tests
 
 Los tests de integracion usan una base PostgreSQL **separada** (`alertas_test`), para no tocar los datos de desarrollo.
@@ -333,6 +364,7 @@ Cosas que quedaron fuera de alcance a proposito, para mantener el challenge simp
 - **Guardar el resultado de cada corrida del job:** hoy el resultado (cuantas notificaciones se crearon, o el error) solo sale en los logs, que no se conservan. Registrar cada ejecucion (fecha, duracion, cantidad creada, error) en una tabla o en un archivo de logs rotado daria trazabilidad del flujo y permitiria saber si una corrida de las 6:00 se perdio o fallo
 - **Confirmar la entrega antes de marcar como leida:** `POST /notifications/consume` marca las notificaciones al devolverlas. Si la respuesta se pierde en el camino, el usuario no la recibe y queda como leida (entrega "a lo sumo una vez"). Una confirmacion explicita del cliente (por ejemplo, un `PATCH` despues de enviar el mensaje por WhatsApp) daria entrega "al menos una vez"
 - **Paginacion de notificaciones** y limpieza de las vencidas: hoy se filtran por fecha pero siguen guardadas
+- **Migraciones fuera del arranque de la app:** hoy cada contenedor `app` corre `alembic upgrade head` al iniciar. Con una sola instancia es seguro, pero con varias replicas arrancando a la vez competirian. Lo habitual es un servicio aparte que migre una vez y termine
 - **Advisory lock:** con varias instancias de la API, cada una corre el job. No genera duplicados (lo evita `ON CONFLICT`), pero repite trabajo. Un lock de PostgreSQL (`pg_try_advisory_lock`) haria que solo una instancia evalue
 - **Re-notificar cambios importantes del pronostico:** si la probabilidad sube mucho despues de avisar, hoy no se vuelve a notificar
 - **Umbrales por magnitud:** ademas de la probabilidad, alertar por milimetros de lluvia o grados de temperatura

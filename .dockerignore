@@ -1,0 +1,23 @@
+# Secretos y configuracion local: las variables llegan por docker compose
+.env
+.env.*
+!.env.example
+
+# Entorno y caches locales
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+
+# No hacen falta en la imagen
+.git
+.gitignore
+tests
+Dockerfile
+docker-compose.yml
+.dockerignore
+todo.md
+notas.md
+task.pdf
+challenge.md
+dbdiagram.png
