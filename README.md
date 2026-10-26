@@ -30,7 +30,7 @@ Con la app levantada, la documentacion interactiva (Swagger) esta en `/docs`, do
 Codigos de error:
 - **404:** el recurso (o el usuario, campo, region o evento referenciado) no existe.
 - **409:** ya existe una alerta de ese campo para ese evento. Hay una sola por par `(campo, evento)`; para cambiarla se usa `PATCH`.
-- **422:** la validacion fallo: umbral fuera de 0 a 100 o no entero, nombre vacio, campos desconocidos en un `PATCH`, falta un parametro obligatorio o un `id` que no es UUID.
+- **422:** la validacion fallo: umbral fuera de 0 a 100 o no entero, nombre vacio o de mas de 100 caracteres o con caracteres nulos (`\u0000`), campos desconocidos en un `PATCH`, falta un parametro obligatorio o un `id` que no es UUID.
 
 Detalle de las notificaciones y de como se generan: [Notificaciones](#notificaciones) y [Background Job](#background-job-de-notificacion-de-alertas).
 
@@ -516,7 +516,7 @@ Table notification {
   }
 }
 
-Ref: farm.user_id > users.id
+Ref: farm.user_id > users.id [delete: cascade]
 Ref: farm.region_id > region.id [delete: restrict]
 Ref: weather_forecast.region_id > region.id
 Ref: weather_forecast.event_id > event.id

@@ -3,7 +3,9 @@
 import uuid
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
+
+from alertas_climaticas.schemas.fields import Name
 
 
 class FarmCreate(BaseModel):
@@ -11,7 +13,7 @@ class FarmCreate(BaseModel):
 
     user_id: uuid.UUID
     region_id: uuid.UUID
-    name: str = Field(min_length=1)
+    name: Name
 
 
 class FarmUpdate(BaseModel):
@@ -19,7 +21,7 @@ class FarmUpdate(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    name: str | None = Field(default=None, min_length=1)
+    name: Name | None = None
     region_id: uuid.UUID | None = None
 
     @model_validator(mode="after")

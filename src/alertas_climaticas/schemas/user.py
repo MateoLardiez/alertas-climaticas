@@ -2,13 +2,15 @@
 
 import uuid
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
+
+from alertas_climaticas.schemas.fields import Name
 
 
 class UserCreate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    name: str = Field(min_length=1)
+    name: Name
 
 
 class UserUpdate(BaseModel):
@@ -16,7 +18,7 @@ class UserUpdate(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    name: str = Field(min_length=1)
+    name: Name
 
 
 class UserRead(BaseModel):
