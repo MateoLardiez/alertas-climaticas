@@ -76,3 +76,28 @@ async def test_downgrade_drops_tables_and_upgrade_restores_them(
         await engine.dispose()
 
     assert await _table_names() == APP_TABLES | {"alembic_version"}
+
+
+async def _farm_user_fk_delete_rule() -> str:
+    async with async_session_factory() as session:
+        return str(
+            await session.scalar(
+                text("SELECT confdeltype::text FROM pg_constraint WHERE conname = 'farm_user_id_fkey'")
+            )
+        )
+
+
+async def test_the_farm_user_fk_cascades_and_the_downgrade_restores_the_old_rule(
+    clean_tables: None, alembic_cfg: Config
+) -> None:
+    assert await _farm_user_fk_delete_rule() == "c"  # CASCADE
+
+    await asyncio.to_thread(command.downgrade, alembic_cfg, "-1")
+    try:
+        await engine.dispose()
+        assert await _farm_user_fk_delete_rule() == "a"  # NO ACTION
+    finally:
+        await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
+        await engine.dispose()
+
+    assert await _farm_user_fk_delete_rule() == "c"

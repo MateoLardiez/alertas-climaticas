@@ -1,13 +1,14 @@
-"""Tests de POST /users, GET /users y GET /users/{id}."""
+"""Tests de los endpoints de usuarios: crear, listar, leer, modificar y borrar."""
 
 import uuid
+from datetime import date
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from alertas_climaticas.models import User
+from alertas_climaticas.models import Alert, Farm, Notification, User
 from tests import factories
 
 
@@ -239,5 +240,197 @@ class TestGetUser:
 
     async def test_malformed_id_returns_422(self, client: AsyncClient) -> None:
         response = await client.get("/users/no-es-un-uuid")
+
+        assert response.status_code == 422
+
+
+class TestUpdateUser:
+    async def test_updates_the_name(self, client: AsyncClient, session: AsyncSession) -> None:
+        user = await factories.create_user(session, "Mateo")
+
+        response = await client.patch(f"/users/{user.id}", json={"name": "Mateo L."})
+
+        assert response.status_code == 200
+        assert response.json() == {"id": str(user.id), "name": "Mateo L."}
+
+    async def test_the_change_is_persisted(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        user = await factories.create_user(session, "Mateo")
+
+        await client.patch(f"/users/{user.id}", json={"name": "Ana"})
+
+        await session.refresh(user)
+        assert user.name == "Ana"
+
+    async def test_strips_whitespace_and_accepts_unicode(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        user = await factories.create_user(session)
+
+        response = await client.patch(f"/users/{user.id}", json={"name": "  José Ñandú  "})
+
+        assert response.json()["name"] == "José Ñandú"
+
+    async def test_only_changes_the_given_user(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        user = await factories.create_user(session, "Mateo")
+        other = await factories.create_user(session, "Ana")
+
+        await client.patch(f"/users/{user.id}", json={"name": "Nuevo"})
+
+        await session.refresh(other)
+        assert other.name == "Ana"
+
+    async def test_keeps_the_users_farms(self, client: AsyncClient, session: AsyncSession) -> None:
+        user = await factories.create_user(session)
+        region = await factories.create_region(session)
+        farm = await factories.create_farm(session, user, region)
+
+        await client.patch(f"/users/{user.id}", json={"name": "Nuevo"})
+
+        detail = await client.get(f"/users/{user.id}")
+        assert detail.json()["farm_ids"] == [str(farm.id)]
+
+    async def test_unknown_user_returns_404(self, client: AsyncClient) -> None:
+        unknown = uuid.uuid4()
+
+        response = await client.patch(f"/users/{unknown}", json={"name": "Ana"})
+
+        assert response.status_code == 404
+        assert response.json() == {"detail": f"User {unknown} not found"}
+
+    @pytest.mark.parametrize(
+        "payload",
+        [{}, {"name": ""}, {"name": "   "}, {"name": None}, {"name": 5}, {"name": ["Ana"]}],
+    )
+    async def test_invalid_payloads_return_422_and_change_nothing(
+        self, client: AsyncClient, session: AsyncSession, payload: dict[str, object]
+    ) -> None:
+        user = await factories.create_user(session, "Mateo")
+
+        response = await client.patch(f"/users/{user.id}", json=payload)
+
+        assert response.status_code == 422
+        await session.refresh(user)
+        assert user.name == "Mateo"
+
+    @pytest.mark.parametrize("field", ["id", "farm_ids", "desconocido"])
+    async def test_fields_that_cannot_be_changed_return_422(
+        self, client: AsyncClient, session: AsyncSession, field: str
+    ) -> None:
+        user = await factories.create_user(session, "Mateo")
+
+        response = await client.patch(
+            f"/users/{user.id}", json={"name": "Nuevo", field: str(uuid.uuid4())}
+        )
+
+        assert response.status_code == 422
+        await session.refresh(user)
+        assert user.name == "Mateo"
+
+    async def test_malformed_id_returns_422(self, client: AsyncClient) -> None:
+        response = await client.patch("/users/no-es-un-uuid", json={"name": "Ana"})
+
+        assert response.status_code == 422
+
+
+class TestDeleteUser:
+    async def test_returns_204_without_body(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        user = await factories.create_user(session)
+
+        response = await client.delete(f"/users/{user.id}")
+
+        assert response.status_code == 204
+        assert response.content == b""
+
+    async def test_the_user_no_longer_exists(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        user = await factories.create_user(session)
+        user_id = user.id
+
+        await client.delete(f"/users/{user_id}")
+
+        assert (await client.get(f"/users/{user_id}")).status_code == 404
+        assert (await client.get("/users")).json() == []
+
+    async def test_only_the_given_user_is_deleted(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        doomed = await factories.create_user(session, "A borrar")
+        kept = await factories.create_user(session, "A conservar")
+
+        await client.delete(f"/users/{doomed.id}")
+
+        assert [user["id"] for user in (await client.get("/users")).json()] == [str(kept.id)]
+
+    async def test_deletes_its_farms_alerts_and_notifications_but_not_others(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        doomed = await factories.create_user(session, "A borrar")
+        kept = await factories.create_user(session, "A conservar")
+        region = await factories.create_region(session)
+        event = await factories.create_event(session)
+        doomed_farm = await factories.create_farm(session, doomed, region, "Campo 1")
+        another_doomed_farm = await factories.create_farm(session, doomed, region, "Campo 2")
+        kept_farm = await factories.create_farm(session, kept, region)
+        for farm in (doomed_farm, another_doomed_farm):
+            alert = await factories.create_alert(session, farm, event)
+            await factories.create_notification(session, alert, date(2026, 1, 15))
+        kept_alert = await factories.create_alert(session, kept_farm, event)
+        kept_notification = await factories.create_notification(
+            session, kept_alert, date(2026, 1, 15)
+        )
+        expected = (kept_farm.id, kept_alert.id, kept_notification.id)
+
+        response = await client.delete(f"/users/{doomed.id}")
+
+        assert response.status_code == 204
+        remaining = (
+            await session.scalar(select(Farm.id)),
+            await session.scalar(select(Alert.id)),
+            await session.scalar(select(Notification.id)),
+        )
+        assert remaining == expected
+        assert await _count_users(session) == 1
+        for model in (Farm, Alert, Notification):
+            assert await session.scalar(select(func.count()).select_from(model)) == 1
+
+    async def test_the_farms_of_a_deleted_user_are_no_longer_reachable(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        user = await factories.create_user(session)
+        region = await factories.create_region(session)
+        farm = await factories.create_farm(session, user, region)
+        farm_id = farm.id
+
+        await client.delete(f"/users/{user.id}")
+
+        assert (await client.get(f"/farms/{farm_id}")).status_code == 404
+
+    async def test_deleting_twice_returns_404_the_second_time(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        user = await factories.create_user(session)
+
+        first = await client.delete(f"/users/{user.id}")
+        second = await client.delete(f"/users/{user.id}")
+
+        assert (first.status_code, second.status_code) == (204, 404)
+
+    async def test_unknown_user_returns_404(self, client: AsyncClient) -> None:
+        unknown = uuid.uuid4()
+
+        response = await client.delete(f"/users/{unknown}")
+
+        assert response.status_code == 404
+        assert response.json() == {"detail": f"User {unknown} not found"}
+
+    async def test_malformed_id_returns_422(self, client: AsyncClient) -> None:
+        response = await client.delete("/users/no-es-un-uuid")
 
         assert response.status_code == 422

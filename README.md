@@ -10,6 +10,8 @@ Con la app levantada, la documentacion interactiva (Swagger) esta en `/docs`, do
 | `POST /users` | Crea un usuario. Body: `name` | 201, 422 |
 | `GET /users` | Lista los usuarios | 200 |
 | `GET /users/{user_id}` | Detalle del usuario, con los `farm_ids` de sus campos | 200, 404 |
+| `PATCH /users/{user_id}` | Cambia el `name` | 200, 404, 422 |
+| `DELETE /users/{user_id}` | Elimina el usuario y, en cascada, sus campos, alertas y notificaciones | 204, 404 |
 | `GET /regions` | Lista las regiones disponibles | 200 |
 | `GET /events` | Lista los tipos de evento (lluvia, helada, tormenta, calor extremo) | 200 |
 | `POST /farms` | Crea un campo. Body: `user_id`, `region_id`, `name` | 201, 404, 422 |
@@ -112,7 +114,7 @@ El codigo DBML que genera el diagrama esta al final de este documento ([Anexo](#
 - **`notification` guarda un snapshot de `probability`:** si el pronostico cambia despues, la notificacion enviada no se modifica.
 - **`read_at` nulo en lugar de un boolean:** nulo significa "no leida" y ademas se sabe cuando se leyo.
 - **Tabla `users` en plural:** `user` es palabra reservada en PostgreSQL.
-- **Borrado:** eliminar una `farm` elimina en cascada sus alertas y notificaciones. Eliminar una `region` con campos asociados se rechaza (`RESTRICT`).
+- **Borrado:** eliminar un `users` elimina en cascada sus campos, y eliminar una `farm` sus alertas y notificaciones. Un solo `DELETE /users/{id}` borra toda la cadena. Eliminar una `region` con campos asociados se rechaza (`RESTRICT`). Regiones y eventos son datos fijos del seed y no tienen endpoints de alta, cambio ni baja.
 
 ## Seed de Datos Meteorologicos
 

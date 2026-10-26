@@ -177,14 +177,6 @@ class TestFarm:
         with pytest.raises(IntegrityError, match="farm_region_id_fkey"):
             await session.execute(delete(Region).where(Region.id == region.id))
 
-    async def test_user_with_farms_cannot_be_deleted(self, session: AsyncSession) -> None:
-        user = await factories.create_user(session)
-        region = await factories.create_region(session)
-        await factories.create_farm(session, user, region)
-
-        with pytest.raises(IntegrityError, match="farm_user_id_fkey"):
-            await session.execute(delete(User).where(User.id == user.id))
-
 
 class TestAlert:
     @pytest.fixture
@@ -309,6 +301,31 @@ class TestNotification:
 
 
 class TestCascadeDeletes:
+    async def test_deleting_a_user_deletes_its_farms_alerts_and_notifications(
+        self, session: AsyncSession
+    ) -> None:
+        doomed = await factories.create_user(session, "A borrar")
+        kept = await factories.create_user(session, "A conservar")
+        region = await factories.create_region(session)
+        event = await factories.create_event(session)
+        doomed_farm = await factories.create_farm(session, doomed, region, "Campo 1")
+        other_doomed_farm = await factories.create_farm(session, doomed, region, "Campo 2")
+        kept_farm = await factories.create_farm(session, kept, region)
+        for farm in (doomed_farm, other_doomed_farm):
+            alert = await factories.create_alert(session, farm, event)
+            await factories.create_notification(session, alert, DAY)
+        kept_alert = await factories.create_alert(session, kept_farm, event)
+        await factories.create_notification(session, kept_alert, DAY)
+
+        await session.execute(delete(User).where(User.id == doomed.id))
+        await session.commit()
+
+        assert await _count(session, User) == 1
+        assert await _count(session, Farm) == 1
+        assert await _count(session, Alert) == 1
+        assert await _count(session, Notification) == 1
+        assert await session.scalar(select(Farm.id)) == kept_farm.id
+
     async def test_deleting_a_farm_deletes_its_alerts_and_notifications(
         self, session: AsyncSession
     ) -> None:

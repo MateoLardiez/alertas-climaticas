@@ -12,7 +12,7 @@ from alertas_climaticas.schemas.event import EventRead
 from alertas_climaticas.schemas.farm import FarmCreate, FarmRead, FarmUpdate
 from alertas_climaticas.schemas.notification import NotificationRead
 from alertas_climaticas.schemas.region import RegionRead
-from alertas_climaticas.schemas.user import UserCreate, UserDetailRead, UserRead
+from alertas_climaticas.schemas.user import UserCreate, UserDetailRead, UserRead, UserUpdate
 
 
 def test_user_create_accepts_a_valid_name() -> None:
@@ -31,6 +31,26 @@ def test_user_create_keeps_unicode_names() -> None:
 def test_user_create_rejects_empty_or_blank_names(name: str) -> None:
     with pytest.raises(ValidationError):
         UserCreate(name=name)
+
+
+def test_user_update_strips_whitespace_and_keeps_unicode() -> None:
+    assert UserUpdate(name="  José Ñandú  ").name == "José Ñandú"
+
+
+@pytest.mark.parametrize("name", ["", "   ", None, 123, ["Mateo"]])
+def test_user_update_rejects_invalid_names(name: object) -> None:
+    with pytest.raises(ValidationError):
+        UserUpdate(name=name)  # type: ignore[arg-type]
+
+
+def test_user_update_requires_the_name() -> None:
+    with pytest.raises(ValidationError):
+        UserUpdate()  # type: ignore[call-arg]
+
+
+def test_user_update_rejects_unknown_fields() -> None:
+    with pytest.raises(ValidationError):
+        UserUpdate(name="Mateo", id="x")  # type: ignore[call-arg]
 
 
 @pytest.mark.parametrize("name", [None, 123, ["Mateo"]])

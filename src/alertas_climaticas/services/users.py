@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from alertas_climaticas.exceptions import NotFoundError
 from alertas_climaticas.models import Farm, User
-from alertas_climaticas.schemas.user import UserCreate, UserDetailRead
+from alertas_climaticas.schemas.user import UserCreate, UserDetailRead, UserUpdate
 
 
 async def create_user(session: AsyncSession, data: UserCreate) -> User:
@@ -36,3 +36,17 @@ async def get_user_detail(session: AsyncSession, user_id: uuid.UUID) -> UserDeta
 async def list_users(session: AsyncSession) -> Sequence[User]:
     result = await session.scalars(select(User).order_by(User.name, User.id))
     return result.all()
+
+
+async def update_user(session: AsyncSession, user_id: uuid.UUID, data: UserUpdate) -> User:
+    user = await get_user(session, user_id)
+    user.name = data.name
+    await session.commit()
+    return user
+
+
+async def delete_user(session: AsyncSession, user_id: uuid.UUID) -> None:
+    # Los campos, y con ellos sus alertas y notificaciones, se borran por ON DELETE CASCADE en la base.
+    user = await get_user(session, user_id)
+    await session.delete(user)
+    await session.commit()
