@@ -26,12 +26,12 @@ from alertas_climaticas.jobs.alert_evaluation import (
 from alertas_climaticas.models import Notification
 from tests import factories
 
-URL = "postgresql+asyncpg://u:p@localhost:5433/db"
+DB = {"db_user": "u", "db_password": "p", "db_name": "db"}
 BUENOS_AIRES = ZoneInfo("America/Argentina/Buenos_Aires")
 
 
 def _settings(**values: object) -> Settings:
-    return Settings(_env_file=None, database_url=URL, **values)  # type: ignore[call-arg, arg-type]
+    return Settings(_env_file=None, **{**DB, **values})  # type: ignore[call-arg, arg-type]
 
 
 async def _count_notifications(session: AsyncSession) -> int:

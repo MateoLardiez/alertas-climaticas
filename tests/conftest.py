@@ -12,11 +12,19 @@ from alembic import command
 from alembic.config import Config
 from dotenv import dotenv_values
 from sqlalchemy import text
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import URL
 
 ROOT = Path(__file__).resolve().parent.parent
-TEST_DATABASE_URL = str(dotenv_values(ROOT / ".env.test")["DATABASE_URL"])
-TEST_DB_NAME = str(make_url(TEST_DATABASE_URL).database)
+_test_env = dotenv_values(ROOT / ".env.test")
+TEST_DATABASE_URL = URL.create(
+    "postgresql+asyncpg",
+    username=_test_env["DB_USER"],
+    password=_test_env["DB_PASSWORD"],
+    host=_test_env["DB_HOST"],
+    port=int(str(_test_env["DB_PORT"])),
+    database=_test_env["DB_NAME"],
+)
+TEST_DB_NAME = str(TEST_DATABASE_URL.database)
 
 # Salvaguarda: el fixture de la base borra todo el esquema, nunca debe apuntar a la base real.
 assert TEST_DB_NAME.endswith("_test"), f"La base de tests debe terminar en _test: {TEST_DB_NAME}"
@@ -35,7 +43,7 @@ from alertas_climaticas.main import app  # noqa: E402
 
 
 def _asyncpg_dsn(database: str) -> str:
-    url = make_url(TEST_DATABASE_URL).set(drivername="postgresql", database=database)
+    url = TEST_DATABASE_URL.set(drivername="postgresql", database=database)
     return url.render_as_string(hide_password=False)
 
 
@@ -66,7 +74,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     try:
         asyncio.run(_try_connect())
     except Exception as exc:
-        url = make_url(TEST_DATABASE_URL)
+        url = TEST_DATABASE_URL
         omitted = db_items[1:]
         _database_error = (
             f"No se pudo conectar a PostgreSQL en {url.host}:{url.port} "

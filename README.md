@@ -247,7 +247,19 @@ El mensaje no incluye el umbral: la alerta se puede editar despues y el texto qu
    ```
    cp .env.example .env
    ```
-   El `.env.example` ya apunta al contenedor del paso anterior. El `.env` no se sube a git.
+   El `.env.example` ya apunta al contenedor del paso anterior. El `.env` no se sube a git. Variables:
+
+   | Variable | Por defecto | Que controla |
+   |---|---|---|
+   | `DB_HOST` | `localhost` | Host de PostgreSQL |
+   | `DB_PORT` | `5432` | Puerto de PostgreSQL (en `.env.example` es `5433`, el del contenedor) |
+   | `DB_USER` | obligatoria | Usuario de la base |
+   | `DB_PASSWORD` | obligatoria | Contrasena de la base. Puede tener caracteres especiales (`@`, `/`, `%`) |
+   | `DB_NAME` | obligatoria | Nombre de la base |
+   | `HOST` | `0.0.0.0` | Interfaz en la que escucha la API (la usa uvicorn, no la app) |
+   | `PORT` | `8000` | Puerto de la API (la usa uvicorn, no la app) |
+
+   La app arma la URL de conexion a partir de las piezas `DB_*`. Las variables del job (`TIMEZONE`, `EVALUATION_*`) estan en [Background Job](#background-job-de-notificacion-de-alertas).
 
 4. **Aplicar las migraciones**
    ```
