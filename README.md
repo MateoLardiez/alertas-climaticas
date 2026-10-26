@@ -3,6 +3,51 @@ Sistema de Alertas Climaticas. Servicio HTTP construido con Python, FastAPI y Po
 
 ## API
 
+Con la app levantada, la documentacion interactiva (Swagger) esta en `/docs`, donde se puede probar cada endpoint. Los `id` son UUID. Los errores devuelven `{"detail": ...}`.
+
+| Metodo y ruta | Que hace | Respuestas |
+|---|---|---|
+| `POST /users` | Crea un usuario. Body: `name` | 201, 422 |
+| `GET /users` | Lista los usuarios | 200 |
+| `GET /users/{user_id}` | Detalle del usuario, con los `farm_ids` de sus campos | 200, 404 |
+| `GET /regions` | Lista las regiones disponibles | 200 |
+| `GET /events` | Lista los tipos de evento (lluvia, helada, tormenta, calor extremo) | 200 |
+| `POST /farms` | Crea un campo. Body: `user_id`, `region_id`, `name` | 201, 404, 422 |
+| `GET /farms?user_id=...` | Lista los campos de un usuario (`user_id` obligatorio) | 200, 422 |
+| `GET /farms/{farm_id}` | Detalle de un campo | 200, 404 |
+| `PATCH /farms/{farm_id}` | Cambia `name` y/o `region_id` (al menos uno) | 200, 404, 422 |
+| `DELETE /farms/{farm_id}` | Elimina el campo y, en cascada, sus alertas y notificaciones | 204, 404 |
+| `POST /alerts` | Crea una alerta. Body: `farm_id`, `event_id`, `threshold` (entero de 0 a 100) | 201, 404, 409, 422 |
+| `GET /alerts?farm_id=...` | Lista las alertas de un campo (`farm_id` obligatorio) | 200, 422 |
+| `GET /alerts/{alert_id}` | Detalle de una alerta | 200, 404 |
+| `PATCH /alerts/{alert_id}` | Cambia solo el `threshold` | 200, 404, 422 |
+| `DELETE /alerts/{alert_id}` | Elimina la alerta y sus notificaciones | 204, 404 |
+| `GET /notifications?user_id=...` | Historial de notificaciones desde hoy. Filtro opcional `read` | 200, 422 |
+| `POST /notifications/consume?user_id=...` | Devuelve las notificaciones nuevas y las marca como leidas | 200, 422 |
+
+Codigos de error:
+- **404:** el recurso (o el usuario, campo, region o evento referenciado) no existe.
+- **409:** ya existe una alerta de ese campo para ese evento. Hay una sola por par `(campo, evento)`; para cambiarla se usa `PATCH`.
+- **422:** la validacion fallo: umbral fuera de 0 a 100 o no entero, nombre vacio, campos desconocidos en un `PATCH`, falta un parametro obligatorio o un `id` que no es UUID.
+
+Detalle de las notificaciones y de como se generan: [Notificaciones](#notificaciones) y [Background Job](#background-job-de-notificacion-de-alertas).
+
+Ejemplo de punta a punta:
+
+```
+# 1. Crear usuario y campo (las regiones y eventos se listan con GET /regions y GET /events)
+curl -X POST localhost:8000/users -H 'Content-Type: application/json' -d '{"name": "Ana"}'
+curl -X POST localhost:8000/farms -H 'Content-Type: application/json' \
+  -d '{"user_id": "<user_id>", "region_id": "<region_id>", "name": "La Esperanza"}'
+
+# 2. Avisar si la probabilidad de lluvia llega al 70%
+curl -X POST localhost:8000/alerts -H 'Content-Type: application/json' \
+  -d '{"farm_id": "<farm_id>", "event_id": "<event_id>", "threshold": 70}'
+
+# 3. Despues de la proxima corrida del job, recibir las notificaciones nuevas
+curl -X POST 'localhost:8000/notifications/consume?user_id=<user_id>'
+```
+
 ## Requerimientos
 
 ### Requerimientos Funcionales
@@ -354,6 +399,33 @@ uv run pytest -m "not db"      # solo los que no necesitan la base
 
 ## Estructura del Sistema
 
+```
+alertas-climaticas/
+├── src/alertas_climaticas/
+│   ├── main.py               # App FastAPI, routers, manejo de errores y arranque del scheduler
+│   ├── config.py             # Variables de entorno tipadas (Settings)
+│   ├── clock.py              # "Hoy" segun la zona horaria configurada
+│   ├── dependencies.py       # Dependencias de FastAPI (fecha de hoy)
+│   ├── exceptions.py         # Errores de dominio (NotFoundError, AlreadyExistsError)
+│   ├── seed.py               # Carga de regiones, eventos y pronosticos mockeados
+│   ├── database/             # Base declarativa, engine y sesion async
+│   ├── models/               # Tablas SQLAlchemy
+│   ├── schemas/              # Validacion y forma de las requests y responses (Pydantic)
+│   ├── routers/              # Capa HTTP: recibe la request y delega
+│   ├── services/             # Logica y acceso a datos, sin nada de HTTP
+│   │   └── evaluation.py     # Cruza alertas con pronosticos y crea notificaciones
+│   └── jobs/
+│       └── alert_evaluation.py   # Scheduler (APScheduler) que corre la evaluacion
+├── alembic/                  # Migraciones
+├── tests/                    # Tests de integracion y unitarios (pytest)
+├── Dockerfile
+├── docker-compose.yml        # App + PostgreSQL
+└── .env.example              # Variables de entorno de ejemplo
+```
+
+**Capas:** una request pasa por `routers` (HTTP: parametros, codigos de estado), que llaman a `services` (logica y consultas a la base). Los `services` no conocen HTTP: lanzan errores de dominio que `main.py` traduce a 404 o 409. Asi la misma logica la usan los endpoints y el job.
+
+**Flujo de una alerta:** el usuario crea una alerta (`POST /alerts`). Una vez por dia el job ejecuta `services/evaluation.py`, que cruza todas las alertas con los pronosticos de los proximos 7 dias de la region de cada campo y guarda una notificacion por cada superacion del umbral. El usuario las recibe con `POST /notifications/consume`.
 
 ## Mejoras
 
