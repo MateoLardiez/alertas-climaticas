@@ -60,7 +60,6 @@ curl -X POST 'localhost:8000/notifications/consume?user_id=<user_id>'
 
 ### Requerimientos No Funcionales
 - **Sin duplicados:** una alerta no notifica dos veces el mismo evento del mismo dia, aunque el job se ejecute varias veces (idempotencia)
-- **Sin falsos negativos:** si la probabilidad alcanza el umbral, se notifica
 - **Seguro ante concurrencia:** dos ejecuciones simultaneas del job no generan notificaciones repetidas
 - **Asincronico:** API y acceso a base de datos async (FastAPI + SQLAlchemy async)
 - **Procesamiento desacoplado:** la evaluacion de alertas corre en un background job independiente de las requests, por lo que ningun endpoint espera a que se evalue
@@ -213,13 +212,13 @@ INSERT INTO notification (alert_id, forecast_date, probability)
 ### Ejecucion periodica
 El job se programa con **APScheduler** (`AsyncIOScheduler`) dentro del `lifespan` de la app: arranca junto con la API y se detiene al apagarla. Se ejecuta como una tarea aparte, por lo que ningun endpoint espera a que se evalue. Corre **una vez por dia, a las 6:00 hora Argentina**.
 
-- **Una vez por dia:** a las 6:00 (`EVALUATION_HOUR`, en la zona `TIMEZONE`), con un disparador `cron` de APScheduler. Una alerta creada durante el dia se evalua en la corrida de la manana siguiente
+- **Una vez por dia:** a las 6:00 (`EVALUATION_HOUR`, en la zona `TIMEZONE`), con un disparador `cron` de APScheduler. Una alerta creada durante el dia se evalua en la corrida de la mañana siguiente
 - **Al arrancar no corre:** si la app estaba apagada a las 6:00, esa corrida no se recupera (el scheduler no guarda estado). Se puede forzar a mano, ver abajo
 - **`max_instances=1`:** nunca hay dos evaluaciones a la vez en el proceso
 - **`coalesce`:** si se acumulan corridas atrasadas, se ejecuta una sola
 - **Errores:** un fallo (por ejemplo, la base no responde) se registra con su detalle y no detiene las siguientes corridas. La siguiente es el reintento
 - **"Hoy":** se calcula en la zona `TIMEZONE`, no en la del servidor. Los pronosticos son por dia de campos en Buenos Aires, y con UTC la ventana quedaria corrida un dia entre las 21:00 y las 24:00
-- **Aislamiento:** el scheduler corre en el mismo proceso que la API. Separarlo en un proceso propio esta en [Mejoras](#mejoras)
+- **Aislamiento:** el scheduler corre en el mismo proceso que la API (aunque de forma concurrente). Separarlo en un proceso propio esta en [Mejoras](#mejoras)
 
 | Variable | Por defecto | Que controla |
 |---|---|---|
@@ -262,7 +261,7 @@ Cada notificacion trae los datos y el mensaje ya armado:
 El mensaje no incluye el umbral: la alerta se puede editar despues y el texto quedaria inexacto.
 
 - **Una sola entrega por notificacion:** `consume` es un unico `UPDATE ... WHERE read_at IS NULL ... RETURNING`. Si dos consumidores piden a la vez, PostgreSQL le entrega cada notificacion a uno solo
-- **Sin control de duenio:** como no hay autenticacion, el usuario se indica con `user_id`. Un usuario inexistente devuelve una lista vacia
+- **Sin control de dueño:** como no hay autenticacion, el usuario se indica con `user_id`. Un usuario inexistente devuelve una lista vacia
 
 ## Compilar y ejecutar
 
@@ -434,7 +433,7 @@ alertas-climaticas/
 Cosas que quedaron fuera de alcance a proposito, para mantener el challenge simple:
 
 - **Job en un proceso aparte:** hoy el scheduler corre dentro de la API. Un worker propio (por ejemplo, otro contenedor que reutilice `run_evaluation`) aislaria el job de la API, que podria reiniciarse o escalar sin afectarlo
-- **Recuperar la corrida perdida:** si la app esta apagada a las 6:00, hoy se espera a la manana siguiente. Un almacen de jobs persistente o una evaluacion al arrancar lo resolverian
+- **Recuperar la corrida perdida:** si la app esta apagada a las 6:00, hoy se espera a la mañana siguiente. Un almacen de jobs persistente o una evaluacion al arrancar lo resolverian
 - **Guardar el resultado de cada corrida del job:** hoy el resultado (cuantas notificaciones se crearon, o el error) solo sale en los logs, que no se conservan. Registrar cada ejecucion (fecha, duracion, cantidad creada, error) en una tabla o en un archivo de logs rotado daria trazabilidad del flujo y permitiria saber si una corrida de las 6:00 se perdio o fallo
 - **Confirmar la entrega antes de marcar como leida:** `POST /notifications/consume` marca las notificaciones al devolverlas. Si la respuesta se pierde en el camino, el usuario no la recibe y queda como leida (entrega "a lo sumo una vez"). Una confirmacion explicita del cliente (por ejemplo, un `PATCH` despues de enviar el mensaje por WhatsApp) daria entrega "al menos una vez"
 - **Paginacion de notificaciones** y limpieza de las vencidas: hoy se filtran por fecha pero siguen guardadas
@@ -444,6 +443,7 @@ Cosas que quedaron fuera de alcance a proposito, para mantener el challenge simp
 - **Umbrales por magnitud:** ademas de la probabilidad, alertar por milimetros de lluvia o grados de temperatura
 - **Autenticacion y autorizacion:** hoy el usuario se identifica con su `id` y cualquiera puede consultar o modificar cualquier recurso
 - **Paginacion** en los listados (`GET /users`, `GET /farms`, `GET /alerts`)
+- **Frontend:** una interfaz web haria la app mas simple de usar y probar. Hoy todo se hace por ids: para crear un campo hay que copiar el `user_id` y el `region_id`, y para crear una alerta, el `farm_id` y el `event_id`. Una pantalla con listas desplegables (regiones, eventos, campos del usuario) evitaria copiar y pegar ids a mano
 
 ## Anexo: Codigo DBML
 
